@@ -8,7 +8,7 @@ from django.contrib.auth.views import password_change
 from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.conf import settings
 
-from django_auth_policy.models import PasswordChange, LoginAttempt, UserChange
+from django_auth_policy.models import PasswordChange, LockoutTracker,  LoginAttempt, UserChange
 from django_auth_policy.forms import (StrictAuthenticationForm,
                                       StrictPasswordChangeForm)
 from django_auth_policy.settings import REPLACE_AUTH_USER_ADMIN
@@ -16,7 +16,7 @@ from django_auth_policy.settings import REPLACE_AUTH_USER_ADMIN
 
 logger = logging.getLogger(__name__)
 
-
+admin.site.register(LockoutTracker)
 class LoginAttemptAdmin(admin.ModelAdmin):
     readonly_fields = ('username', 'source_address', 'hostname', 'successful',
                        'user', 'timestamp', 'lockout')
@@ -117,7 +117,6 @@ def admin_login(request, extra_context=None):
     q = REDIRECT_FIELD_NAME + '=' + request.get_full_path()
     return http.HttpResponseRedirect(reverse('login') + '?' + q)
 
-
 def admin_password_change(request, extra_context=None):
     """
     Handles the "change password" task -- both form display and validation.
@@ -129,7 +128,7 @@ def admin_password_change(request, extra_context=None):
         'password_change_form': StrictPasswordChangeForm,
         'extra_context': dict(admin.site.each_context(request),
                               **(extra_context or {})),
-    }
+   }
     if admin.site.password_change_template is not None:
         defaults['template_name'] = admin.site.password_change_template
     return password_change(request, **defaults)

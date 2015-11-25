@@ -32,7 +32,7 @@ class PasswordStrengthPolicyHandler(object):
                 self.policy_texts.append({
                     'text': policy.policy_text,
                     'caption': policy.policy_caption,
-                })
+                })  
 
     def validate(self, password, user=None):
         """ Validate password strength against all password policies.
@@ -42,7 +42,6 @@ class PasswordStrengthPolicyHandler(object):
         """
         for pol in self._policies:
             pol.validate(password, user)
-
 
 class PasswordChangePolicyHandler(object):
     """ Runs all policies related to enforced password changes
@@ -132,7 +131,7 @@ class AuthenticationPolicyHandler(object):
 
         for pol in self._policies:
             pol.pre_auth_check(attempt, password)
-
+            
         return attempt
 
     def post_auth_checks(self, attempt):
@@ -164,3 +163,5 @@ class AuthenticationPolicyHandler(object):
             pol.auth_success(attempt)
 
         return attempt
+                               
+                                                  

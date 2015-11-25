@@ -46,7 +46,7 @@ class PasswordStrengthPolicy(BasePolicy):
 
 
 class PasswordMinLength(PasswordStrengthPolicy):
-    min_length = 10
+    min_length = 8 
     text = _('Passwords must be at least {min_length} characters in length.')
 
     def validate(self, value, user=None):
@@ -203,7 +203,7 @@ class PasswordLimitReuse(PasswordStrengthPolicy):
     """ Limits reuse of previous passwords
     Use this to prevent users from reusing one of their previous passwords
     """
-    max_pw_history = 3
+    max_pw_history = 4
     text = _('Password must be different than your last password.')
     plural_text = _('Passwords must not be one of your last {max_pw_history} '
                     'passwords.')

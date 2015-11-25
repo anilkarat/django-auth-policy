@@ -21,7 +21,7 @@ class PasswordChangeExpired(PasswordChangePolicy):
     """ Enforces expired password to be changed.
     """
     # Password expiration period in days
-    max_age = 90
+    max_age = 60 
     policy_text = _('One is required to change passwords every {age} days.')
     text = _('Your password has expired and must be changed.')
     allow_empty_password_history = False

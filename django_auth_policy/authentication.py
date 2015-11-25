@@ -8,7 +8,7 @@ from django.core.exceptions import ValidationError
 from django.utils.translation import ugettext_lazy as _
 
 from django_auth_policy import signals
-from django_auth_policy.models import LoginAttempt
+from django_auth_policy.models import LoginAttempt, LockoutTracker
 from django_auth_policy import BasePolicy
 
 
@@ -46,7 +46,7 @@ class AuthenticationBasicChecks(AuthenticationPolicy):
              "Note that both fields may be case-sensitive.")
 
     def pre_auth_check(self, loginattempt, password):
-        if not loginattempt.username:
+	if not loginattempt.username:
             logger.info(u'Authentication failure, address=%s, '
                         'no username supplied.',
                         loginattempt.source_address)
@@ -125,14 +125,15 @@ class AuthenticationLockedUsername(AuthenticationPolicy):
     # None = indefinite
     period = None
     # Lockout duration in seconds
-    lockout_duration = 60 * 10
+    lockout_duration = 60*3
     # Validation error
     text = _(u'Too many failed login attempts. Your account has been locked '
              'for {duration}.')
-
     def pre_auth_check(self, loginattempt, password):
-        try:
-            prev_login = LoginAttempt.objects.filter(
+        count = 0
+        lockout_tracker = None
+	try:
+	    prev_login = LoginAttempt.objects.filter(
                 username=loginattempt.username).exclude(
                 pk=loginattempt.pk).order_by('-id')[0]
         except IndexError:
@@ -146,38 +147,71 @@ class AuthenticationLockedUsername(AuthenticationPolicy):
 
         # If previous login was before lockout duration one is not
         # locked out (anymore)
-        lock_from = (timezone.now() -
-                     datetime.timedelta(seconds=self.lockout_duration))
-        if prev_login.timestamp < lock_from:
-            return
+        try:
+          lockout_tracker = LockoutTracker.objects.filter(loginAttempt__username = loginattempt.username).order_by("-id")[0]
+        except IndexError as e:
+          print e
+         
+        if lockout_tracker != None:  
+          attempts_after_lockout = None
+          lock_from = (timezone.now() -
+                       datetime.timedelta(seconds=self.lockout_duration))
+          if lockout_tracker.loginAttempt.timestamp < lock_from:
+             try:
+               attempts_after_lockout = LoginAttempt.objects.filter(
+                                        username=loginattempt.username, timestamp__gt=(lockout_tracker.loginAttempt.timestamp + datetime.timedelta(seconds=self.lockout_duration))).exclude(
+                                        pk=loginattempt.pk)[:3] 
+               for entry in attempts_after_lockout:
+                 if entry.successful == False:
+                   count += 1 
+               if count < self.max_failed:
+                 return
+             except IndexError:
+               return
 
         # Count number of locking login attempts
-        user_lockout = LoginAttempt.objects.filter(
-            username=loginattempt.username, successful=False,
-            lockout=True).exclude(pk=loginattempt.pk)
+	user_lockout = LoginAttempt.objects.filter(
+            username=loginattempt.username).exclude(pk=loginattempt.pk)[:3]
+        #if self.period is not None:
+            #lockout_count_from = timezone.now() - datetime.timedelta(
+            #    seconds=self.period)
+        for entry in user_lockout:
+          if entry.successful == False:
+            count += 1
+            #user_lockout = user_lockout.filter(
+            #    successful=False, lockout=True)
+		#timestamp__gt=lockout_count_from)
 
-        if self.period is not None:
-            lockout_count_from = timezone.now() - datetime.timedelta(
-                seconds=self.period)
-            user_lockout = user_lockout.filter(
-                timestamp__gt=lockout_count_from)
-
-        if user_lockout.count() >= self.max_failed:
-            logger.info(u'Authentication failure, username=%s, address=%s, '
+        if count >= self.max_failed:
+          try: 
+	    lockout_tracker = LockoutTracker.objects.filter(loginAttempt__username = loginattempt.username).order_by("-id")[0]
+          except IndexError as e:
+            print e
+         
+          if lockout_tracker == None or (lockout_tracker.loginAttempt.timestamp + datetime.timedelta(seconds=self.lockout_duration)) < timezone.now():
+	     LockoutTracker.objects.create(loginAttempt = loginattempt)
+	     logger.info(u'Authentication failure, username=%s, address=%s, '
                         'username locked', loginattempt.username,
                         loginattempt.source_address)
-            raise ValidationError(self.validation_msg,
-                                  code='username_locked_out')
-
+             raise ValidationError(self.validation_msg,
+                                   code='username_locked')
+          else:
+	    lockout_span = ((lockout_tracker.loginAttempt.timestamp + datetime.timedelta(seconds=self.lockout_duration)) - timezone.now()).seconds
+	    dur = _format_lockduration(lockout_span)
+	    msg = self.text.format(duration=dur)
+	    raise ValidationError(msg,
+	                         code='username_locked')
+    
     def auth_success(self, loginattempt):
-        # Reset lockout counts for username
+        #import pdb;pdb.set_trace()
+	# Reset lockout counts for username
         LoginAttempt.objects.filter(username=loginattempt.username,
                                     lockout=True).update(lockout=False)
 
     @property
     def validation_msg(self):
-        dur = _format_lockduration(self.lockout_duration)
-        return self.text.format(duration=dur)
+	dur = _format_lockduration(self.lockout_duration)
+	return self.text.format(duration=dur)
 
 
 class AuthenticationLockedRemoteAddress(AuthenticationPolicy):
@@ -189,15 +223,17 @@ class AuthenticationLockedRemoteAddress(AuthenticationPolicy):
     # Period in seconds used to count number of failed login attempts
     period = None
     # Lockout duration in seconds
-    lockout_duration = 60 * 10
+    lockout_duration = 60*3
     # Validation error
     text = _(u'Too many failed login attempts. Your account has been locked '
              'for {duration}.')
 
     def pre_auth_check(self, loginattempt, password):
-        try:
-            prev_login = LoginAttempt.objects.filter(
-                source_address=loginattempt.source_address).exclude(
+        count = 0
+	lockout_tracker = None
+	try:
+	    prev_login = LoginAttempt.objects.filter(
+                username=loginattempt.username).exclude(
                 pk=loginattempt.pk).order_by('-id')[0]
         except IndexError:
             # No login attempts for this username and thus no lockout
@@ -210,40 +246,83 @@ class AuthenticationLockedRemoteAddress(AuthenticationPolicy):
 
         # If previous login was before lockout duration one is not
         # locked out (anymore)
-        lock_from = (timezone.now() -
-                     datetime.timedelta(seconds=self.lockout_duration))
-        if prev_login.timestamp < lock_from:
-            return
+        try:
+	  lockout_tracker = LockoutTracker.objects.filter(loginAttempt__username = loginattempt.username).order_by("-id")[0]
+	except IndexError as e:
+      	  print e
+        
+        try:
+          lockout_tracker = LockoutTracker.objects.filter(loginAttempt__username = loginattempt.username).order_by("-id")[0]
+        except IndexError as e:
+          print e
+
+        if lockout_tracker != None:
+          attempts_after_lockout = None
+          lock_from = (timezone.now() -
+                       datetime.timedelta(seconds=self.lockout_duration))
+          if lockout_tracker.loginAttempt.timestamp < lock_from:
+             try:
+               attempts_after_lockout = LoginAttempt.objects.filter(
+                                        username=loginattempt.username, timestamp__gt=(lockout_tracker.loginAttempt.timestamp + datetime.timedelta(seconds=self.lockout_duration))).exclude(
+                                        pk=loginattempt.pk)[:3]       
+               for entry in attempts_after_lockout:
+                 if entry.successful == False:
+                   count += 1
+               if count < self.max_failed:
+                 return
+             except IndexError:
+               return 	
 
         # Count number of locking login attempts
         user_lockout = LoginAttempt.objects.filter(
-            source_address=loginattempt.source_address, successful=False,
-            lockout=True).exclude(pk=loginattempt.pk)
+            username=loginattempt.username).exclude(pk=loginattempt.pk)[:3]
 
-        if self.period is not None:
-            lockout_count_from = timezone.now() - datetime.timedelta(
-                seconds=self.period)
-            user_lockout = user_lockout.filter(
-                timestamp__gt=lockout_count_from)
-
-        if user_lockout.count() >= self.max_failed:
-            logger.info(u'Authentication failure, username=%s, address=%s, '
-                        'address locked',
-                        loginattempt.username,
-                        loginattempt.source_address)
-            raise ValidationError(self.validation_msg,
-                                  code='address_locked_out')
+        
+	#if self.period is not None:
+            #lockout_count_from = timezone.now() - datetime.timedelta(
+            #    seconds=self.period)
+	for entry in user_lockout:
+	  if entry.successful == False:
+	    count += 1
+	    #user_lockout = user_lockout.filter(
+            #    successful=False, lockout=True)
+        #print count
+        if count >= self.max_failed:
+	  try:
+            lockout_tracker = LockoutTracker.objects.filter(loginAttempt__username = loginattempt.username).order_by("-id")[0]
+          except IndexError as e:
+            print e
+        
+          if lockout_tracker == None or (lockout_tracker.loginAttempt.timestamp + datetime.timedelta(seconds=self.lockout_duration)) < timezone.now():
+             LockoutTracker.objects.create(loginAttempt = loginattempt)
+             logger.info(u'Authentication failure, username=%s, address=%s, '
+                         'username locked', loginattempt.username,
+                         loginattempt.source_address)
+             raise ValidationError(self.validation_msg,
+                                   code='username_locked')
+          else:
+	     lockout_span = ((lockout_tracker.loginAttempt.timestamp + datetime.timedelta(seconds=self.lockout_duration)) - timezone.now()).seconds
+	     dur = _format_lockduration(lockout_span)
+	     msg = self.text.format(duration=dur)
+             raise ValidationError(msg,
+                                   code='username_locked')
+        
 
     def auth_success(self, loginattempt):
         # Reset lockout counts for password
-        LoginAttempt.objects.filter(source_address=loginattempt.source_address,
+        LoginAttempt.objects.filter(username=loginattempt.username,
                                     lockout=True).update(lockout=False)
 
     @property
     def validation_msg(self):
         dur = _format_lockduration(self.lockout_duration)
         return self.text.format(duration=dur)
-
+    
+    #@property
+    def left_time_validation_msg(self, timestamp):
+      lockout_span = (timezone.now() - (timestamp + datetime.timedelta(seconds=self.lockout_duration))).seconds
+      dur = _format_lockduration(lockout_span)
+      return self.text.format(duration=dur) 
 
 class AuthenticationUsernameWhitelist(AuthenticationPolicy):
     """ Only allow usernames that match regular expressions

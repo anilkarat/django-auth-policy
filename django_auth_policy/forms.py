@@ -51,10 +51,8 @@ class StrictAuthenticationForm(forms.Form):
         host = self.request.get_host()
         username = self.cleaned_data.get('username')
         password = self.cleaned_data.get('password')
-
         attempt = self.auth_policy.pre_auth_checks(username, password,
                                                    remote_addr, host)
-
         if username and password:
             self.user_cache = authenticate(username=username, password=password)
             if self.user_cache is None:

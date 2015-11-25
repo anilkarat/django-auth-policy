@@ -84,6 +84,14 @@ class LoginAttempt(models.Model):
                                              self.timestamp,
                                              self.source_address)
 
+class LockoutTracker(models.Model):
+  loginAttempt = models.ForeignKey(LoginAttempt) 
+    
+  class Meta:
+    verbose_name = _('LockoutTracker')
+    verbose_name_plural = _('LockoutTrackers')
+
+
 
 class PasswordChangeAdmin(models.Manager):
     def set_temporary_password(self, user):
